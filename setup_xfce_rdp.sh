@@ -342,6 +342,7 @@ install_packages() {
     
     case $DISTRO in
         ubuntu|debian)
+            # Install core packages first
             sudo DEBIAN_FRONTEND=noninteractive apt install -y \
                 xfce4 \
                 xfce4-goodies \
@@ -361,9 +362,20 @@ install_packages() {
                 gvfs \
                 gvfs-backends \
                 at-spi2-core \
-                pulseaudio-module-xrdp \
                 netcat-openbsd \
                 net-tools
+            
+            # Try to install pulseaudio-module-xrdp if available
+            if apt-cache search pulseaudio-module-xrdp | grep -q pulseaudio-module-xrdp; then
+                log "Installing pulseaudio-module-xrdp for audio support..."
+                sudo DEBIAN_FRONTEND=noninteractive apt install -y pulseaudio-module-xrdp
+            else
+                warn "pulseaudio-module-xrdp not available, will configure manual audio support"
+                # Install alternative audio packages
+                sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+                    pulseaudio-utils \
+                    alsa-utils || true
+            fi
             ;;
         centos|rhel|rocky|almalinux)
             # Enable EPEL repository
@@ -460,6 +472,9 @@ EOF'
     
     sudo chmod +x /etc/xrdp/startwm.sh
     
+    # Configure audio for RDP sessions
+    configure_rdp_audio
+    
     # Configure xrdp.ini for better performance
     sudo sed -i 's/max_bpp=32/max_bpp=24/' /etc/xrdp/xrdp.ini
     sudo sed -i 's/#tcp_nodelay=1/tcp_nodelay=1/' /etc/xrdp/xrdp.ini
@@ -488,6 +503,57 @@ ResultAny=no
 ResultInactive=no
 ResultActive=yes
 POLKIT_EOF'
+}
+
+# Configure audio for RDP sessions
+configure_rdp_audio() {
+    log "Configuring audio support for RDP sessions..."
+    
+    # Check if pulseaudio-module-xrdp is installed
+    if dpkg -l | grep -q pulseaudio-module-xrdp; then
+        log "pulseaudio-module-xrdp is installed, using advanced audio configuration"
+        
+        # Enable xrdp sound module in pulse
+        sudo sed -i '/^load-module module-native-protocol-unix/a load-module module-xrdp-sink\nload-module module-xrdp-source' /etc/pulse/default.pa 2>/dev/null || true
+        
+    else
+        log "Setting up basic audio configuration without pulseaudio-module-xrdp"
+        
+        # Create pulse configuration for RDP users
+        sudo mkdir -p /etc/pulse/client.conf.d
+        sudo bash -c 'cat > /etc/pulse/client.conf.d/00-disable-autospawn.conf << "PULSE_EOF"
+# Disable autospawn for RDP sessions to prevent conflicts
+autospawn = no
+PULSE_EOF'
+        
+        # Create script to start pulseaudio in user sessions
+        sudo bash -c 'cat > /usr/local/bin/rdp-pulseaudio-start << "PULSE_SCRIPT_EOF"
+#!/bin/bash
+# Start PulseAudio for RDP session if not running
+
+if ! pgrep -u $USER pulseaudio >/dev/null; then
+    pulseaudio --start --log-target=syslog &
+    sleep 1
+fi
+PULSE_SCRIPT_EOF'
+        
+        sudo chmod +x /usr/local/bin/rdp-pulseaudio-start
+        
+        # Add pulseaudio startup to user session
+        mkdir -p ~/.config/autostart
+        cat > ~/.config/autostart/pulseaudio-rdp.desktop << 'AUTOSTART_EOF'
+[Desktop Entry]
+Type=Application
+Name=PulseAudio for RDP
+Exec=/usr/local/bin/rdp-pulseaudio-start
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+AUTOSTART_EOF
+    fi
+    
+    # Ensure user is in audio group
+    sudo usermod -a -G audio $USER || warn "Failed to add user to audio group"
 }
 
 # Configure firewall
@@ -598,6 +664,23 @@ create_rdp_user() {
 XFCE_EOF
         "
         
+        # Configure audio for new RDP user
+        if ! dpkg -l | grep -q pulseaudio-module-xrdp; then
+            log "Configuring audio for RDP user '$rdp_username'"
+            sudo -u "$rdp_username" bash -c "
+                mkdir -p /home/$rdp_username/.config/autostart
+                cat > /home/$rdp_username/.config/autostart/pulseaudio-rdp.desktop << 'USER_AUTOSTART_EOF'
+[Desktop Entry]
+Type=Application
+Name=PulseAudio for RDP
+Exec=/usr/local/bin/rdp-pulseaudio-start
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+USER_AUTOSTART_EOF
+            "
+        fi
+        
         log "RDP user '$rdp_username' created successfully"
     fi
 }
@@ -669,7 +752,12 @@ display_connection_info() {
     echo -e "${YELLOW}Troubleshooting Tips:${NC}"
     echo "- If desktop appears black: sudo systemctl restart xrdp"
     echo "- If connection rejected: Check ufw status and xrdp service"
-    echo "- For audio issues: pulseaudio-module-xrdp is already installed"
+    if dpkg -l | grep -q pulseaudio-module-xrdp; then
+        echo "- Audio: pulseaudio-module-xrdp is installed for optimal audio"
+    else
+        echo "- Audio: Basic audio configured, restart session if no sound"
+        echo "- Audio: Check 'pulseaudio --start' in RDP session if needed"
+    fi
     echo "- Check logs: journalctl -u xrdp -f"
     echo "- For Ubuntu 22.04+: May need to disable Wayland (already handled)"
     echo
@@ -710,7 +798,11 @@ main() {
         echo -e "${GREEN}Next steps:${NC}"
         echo "1. Test RDP connection from macOS using Microsoft Remote Desktop"
         echo "2. If this is first desktop installation, consider rebooting"
-        echo "3. For audio support, make sure pulseaudio is running in user session"
+        if dpkg -l | grep -q pulseaudio-module-xrdp; then
+            echo "3. Audio should work automatically with pulseaudio-module-xrdp"
+        else
+            echo "3. Audio configured with fallback method - may need session restart for sound"
+        fi
         
         # Show backup information if backup was created
         if [[ -n "$BACKUP_DIR" ]] && [[ -d "$BACKUP_DIR" ]]; then

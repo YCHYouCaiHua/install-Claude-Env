@@ -3,7 +3,8 @@
 # XFCE Desktop + RDP Setup Script for Linux
 # Compatible with Ubuntu/Debian and CentOS/RHEL/Rocky Linux
 # 
-# Usage: ./setup_xfce_rdp.sh
+# Usage: ./setup_xfce_rdp.sh [OPTIONS]
+#        ./setup_xfce_rdp.sh --auto-yes    # Automated installation
 # 
 # This script will:
 # 1. Install XFCE desktop environment
@@ -27,6 +28,35 @@ NC='\033[0m' # No Color
 
 # Global variables
 BACKUP_DIR=""
+AUTO_YES="0"
+
+# Parse command line arguments
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --auto-yes|-y)
+                AUTO_YES="1"
+                log "Auto mode enabled: Will skip interactive prompts where possible"
+                shift
+                ;;
+            --help|-h)
+                echo "Usage: $0 [OPTIONS]"
+                echo "Options:"
+                echo "  --auto-yes, -y      Skip interactive prompts (recommended for automation)"
+                echo "  --help, -h          Show this help message"
+                echo
+                echo "Environment variables:"
+                echo "  AUTO_YES=1          Same as --auto-yes flag"
+                exit 0
+                ;;
+            *)
+                error "Unknown option: $1"
+                echo "Use --help for usage information"
+                exit 1
+                ;;
+        esac
+    done
+}
 
 # Logging function
 log() {
@@ -277,6 +307,13 @@ EOF'
 # Handle existing installation
 handle_existing_installation() {
     if check_existing_setup; then
+        if [[ "$AUTO_YES" == "1" ]]; then
+            log "Auto mode: Automatically choosing to clean and reconfigure existing installation"
+            backup_existing_config
+            clean_existing_setup
+            return 0
+        fi
+        
         echo -e "${YELLOW}How would you like to proceed?${NC}"
         echo "1) Clean and reconfigure (recommended)"
         echo "2) Keep existing and try to upgrade/fix"
@@ -614,6 +651,71 @@ start_services() {
 # Create RDP user if needed
 create_rdp_user() {
     echo
+    
+    # Check for auto mode
+    if [[ "$AUTO_YES" == "1" ]]; then
+        log "Auto mode: Creating dedicated RDP user 'user110'"
+        rdp_username="user110"
+        rdp_password="111111"
+        
+        # Check if user already exists
+        if id "$rdp_username" &>/dev/null; then
+            warn "User '$rdp_username' already exists. Updating password and configuration..."
+            echo "$rdp_username:$rdp_password" | sudo chpasswd
+        else
+            # Create new user
+            sudo useradd -m -s /bin/bash "$rdp_username"
+            echo "$rdp_username:$rdp_password" | sudo chpasswd
+            log "Created RDP user '$rdp_username'"
+        fi
+        
+        # Clear password from memory for security
+        rdp_password=""
+        
+        # Add user to required groups for Ubuntu
+        sudo usermod -a -G audio "$rdp_username" || warn "Failed to add $rdp_username to audio group"
+        if getent group ssl-cert >/dev/null 2>&1; then
+            sudo adduser "$rdp_username" ssl-cert || warn "Failed to add $rdp_username to ssl-cert group"
+        fi
+        
+        # Configure XFCE for new user
+        sudo -u "$rdp_username" bash -c "
+            echo 'xfce4-session' > /home/$rdp_username/.xsession
+            chmod +x /home/$rdp_username/.xsession
+            echo 'exec xfce4-session' > /home/$rdp_username/.Xclients
+            chmod +x /home/$rdp_username/.Xclients
+            mkdir -p /home/$rdp_username/.config/xfce4/xfconf/xfce-perchannel-xml
+            cat > /home/$rdp_username/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml << 'XFCE_EOF'
+<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<channel name=\"xfwm4\" version=\"1.0\">
+  <property name=\"general\" type=\"empty\">
+    <property name=\"use_compositing\" type=\"bool\" value=\"false\"/>
+  </property>
+</channel>
+XFCE_EOF
+        "
+        
+        # Configure audio for new RDP user
+        if ! dpkg -l | grep -q pulseaudio-module-xrdp; then
+            log "Configuring audio for RDP user '$rdp_username'"
+            sudo -u "$rdp_username" bash -c "
+                mkdir -p /home/$rdp_username/.config/autostart
+                cat > /home/$rdp_username/.config/autostart/pulseaudio-rdp.desktop << 'USER_AUTOSTART_EOF'
+[Desktop Entry]
+Type=Application
+Name=PulseAudio for RDP
+Exec=/usr/local/bin/rdp-pulseaudio-start
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+USER_AUTOSTART_EOF
+            "
+        fi
+        
+        log "RDP user 'user110' configured successfully"
+        return 0
+    fi
+    
     read -p "Do you want to create a dedicated RDP user? (y/N): " create_user
     if [[ $create_user =~ ^[Yy]$ ]]; then
         read -p "Enter username for RDP user: " rdp_username
@@ -734,12 +836,18 @@ display_connection_info() {
     echo "1. Open Microsoft Remote Desktop app"
     echo "2. Click 'Add PC'"
     echo "3. Enter PC name: $(hostname -I | awk '{print $1}')"
-    echo "4. User account: Add user account with your Linux username"
+    if [[ "$AUTO_YES" == "1" ]]; then
+        echo "4. User account: Use 'user110' with password '111111'"
+    else
+        echo "4. User account: Add user account with your Linux username"
+    fi
     echo "5. Click 'Save'"
     echo
     echo -e "${YELLOW}Available user accounts:${NC}"
     echo "- Current user: $USER"
-    if [[ -n "$rdp_username" ]]; then
+    if [[ "$AUTO_YES" == "1" ]]; then
+        echo "- RDP user: user110 (password: 111111)"
+    elif [[ -n "$rdp_username" ]]; then
         echo "- RDP user: $rdp_username"
     fi
     echo
@@ -768,9 +876,335 @@ display_connection_info() {
     echo "You can now connect from your macOS using Microsoft Remote Desktop app."
 }
 
-# Main execution
-main() {
-    log "Starting XFCE + RDP setup script..."
+# Completely purge all desktop environments and RDP configurations
+purge_all_desktop_environments() {
+    echo
+    echo -e "${RED}================================${NC}"
+    echo -e "${RED}  DESKTOP ENVIRONMENT PURGE${NC}"
+    echo -e "${RED}================================${NC}"
+    echo
+    warn "This operation will completely remove the following:"
+    echo "  • All desktop environment packages (XFCE, GNOME, KDE, LXDE, etc.)"
+    echo "  • All RDP configurations and services"
+    echo "  • All user desktop configuration files"
+    echo "  • System desktop-related configurations"
+    echo "  • Auto-created RDP users (like user110)"
+    echo "  • Package caches and orphaned packages"
+    echo
+    echo -e "${RED}WARNING: This operation is IRREVERSIBLE!${NC}"
+    echo
+    
+    read -p "Are you sure you want to continue? Please type 'YES' to confirm: " confirm
+    if [[ "$confirm" != "YES" ]]; then
+        log "Purge operation cancelled"
+        exit 0
+    fi
+    
+    log "Starting complete desktop environment purge..."
+    
+    # Stop all related services
+    log "Stopping desktop-related services..."
+    sudo systemctl stop xrdp 2>/dev/null || true
+    sudo systemctl stop xrdp-sesman 2>/dev/null || true
+    sudo systemctl stop lightdm 2>/dev/null || true
+    sudo systemctl stop gdm3 2>/dev/null || true
+    sudo systemctl stop sddm 2>/dev/null || true
+    sudo systemctl stop lxdm 2>/dev/null || true
+    
+    sudo systemctl disable xrdp 2>/dev/null || true
+    sudo systemctl disable xrdp-sesman 2>/dev/null || true
+    sudo systemctl disable lightdm 2>/dev/null || true
+    sudo systemctl disable gdm3 2>/dev/null || true
+    sudo systemctl disable sddm 2>/dev/null || true
+    sudo systemctl disable lxdm 2>/dev/null || true
+    
+    # Remove auto-created RDP users
+    log "Removing auto-created RDP users..."
+    if id "user110" &>/dev/null; then
+        log "Removing user110..."
+        sudo pkill -u user110 2>/dev/null || true
+        sudo userdel -r user110 2>/dev/null || true
+        log "User user110 removed"
+    fi
+    
+    # Detect distribution for appropriate package manager
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        DISTRO=$ID
+    else
+        error "Cannot detect Linux distribution"
+        exit 1
+    fi
+    
+    # Uninstall all desktop environments based on distribution
+    log "Uninstalling desktop environment packages..."
+    
+    case $DISTRO in
+        ubuntu|debian)
+            sudo DEBIAN_FRONTEND=noninteractive apt remove --purge -y \
+                xfce4* \
+                xfce4-goodies* \
+                openbox* \
+                obconf \
+                obmenu \
+                tint2 \
+                lxde* \
+                gnome* \
+                kde* \
+                unity* \
+                mate* \
+                cinnamon* \
+                xrdp* \
+                lightdm* \
+                gdm3* \
+                sddm* \
+                lxdm* \
+                pcmanfm \
+                thunar \
+                lxterminal \
+                xfce4-terminal \
+                leafpad \
+                mousepad \
+                ristretto \
+                xfce4-screenshooter \
+                pavucontrol \
+                pulseaudio-module-xrdp \
+                network-manager-gnome \
+                at-spi2-core \
+                gvfs \
+                gvfs-backends \
+                2>/dev/null || true
+            ;;
+        centos|rhel|rocky|almalinux|fedora)
+            if command -v dnf >/dev/null 2>&1; then
+                sudo dnf groupremove -y "Xfce Desktop" "GNOME Desktop" "KDE Plasma Workspaces" 2>/dev/null || true
+                sudo dnf remove -y xrdp firefox thunar pulseaudio pavucontrol mousepad 2>/dev/null || true
+            elif command -v yum >/dev/null 2>&1; then
+                sudo yum groupremove -y "Xfce" "GNOME Desktop" "KDE Plasma Workspaces" 2>/dev/null || true
+                sudo yum remove -y xrdp firefox thunar pulseaudio pavucontrol mousepad 2>/dev/null || true
+            fi
+            ;;
+    esac
+    
+    # Clean orphaned packages and dependencies
+    log "Cleaning orphaned packages..."
+    case $DISTRO in
+        ubuntu|debian)
+            sudo apt autoremove --purge -y
+            sudo apt autoclean
+            ;;
+        centos|rhel|rocky|almalinux|fedora)
+            if command -v dnf >/dev/null 2>&1; then
+                sudo dnf autoremove -y
+                sudo dnf clean all
+            elif command -v yum >/dev/null 2>&1; then
+                sudo yum autoremove -y
+                sudo yum clean all
+            fi
+            ;;
+    esac
+    
+    # Clean user configurations
+    log "Cleaning user desktop configurations..."
+    
+    # Clean current user's configurations
+    [[ -f ~/.xsession ]] && rm -f ~/.xsession && log "Removed ~/.xsession"
+    [[ -f ~/.Xclients ]] && rm -f ~/.Xclients && log "Removed ~/.Xclients"
+    [[ -d ~/.config/xfce4 ]] && rm -rf ~/.config/xfce4 && log "Removed ~/.config/xfce4"
+    [[ -d ~/.config/openbox ]] && rm -rf ~/.config/openbox && log "Removed ~/.config/openbox"
+    [[ -d ~/.config/tint2 ]] && rm -rf ~/.config/tint2 && log "Removed ~/.config/tint2"
+    [[ -d ~/.config/lxpanel ]] && rm -rf ~/.config/lxpanel && log "Removed ~/.config/lxpanel"
+    [[ -d ~/.config/lxsession ]] && rm -rf ~/.config/lxsession && log "Removed ~/.config/lxsession"
+    [[ -d ~/.config/autostart ]] && rm -rf ~/.config/autostart && log "Removed ~/.config/autostart"
+    [[ -d ~/.config/Thunar ]] && rm -rf ~/.config/Thunar && log "Removed ~/.config/Thunar"
+    [[ -d ~/.config/xfce4-session ]] && rm -rf ~/.config/xfce4-session && log "Removed ~/.config/xfce4-session"
+    
+    # Clean other desktop-related configurations
+    [[ -f ~/.dmrc ]] && rm -f ~/.dmrc && log "Removed ~/.dmrc"
+    [[ -f ~/.xprofile ]] && rm -f ~/.xprofile && log "Removed ~/.xprofile"
+    [[ -f ~/.xinitrc ]] && rm -f ~/.xinitrc && log "Removed ~/.xinitrc"
+    [[ -f ~/.gtkrc-2.0 ]] && rm -f ~/.gtkrc-2.0 && log "Removed ~/.gtkrc-2.0"
+    [[ -d ~/.themes ]] && rm -rf ~/.themes && log "Removed ~/.themes"
+    [[ -d ~/.icons ]] && rm -rf ~/.icons && log "Removed ~/.icons"
+    
+    # Clean all users' configurations (requires sudo)
+    log "Cleaning system-wide desktop configurations..."
+    for user_home in /home/*; do
+        if [[ -d "$user_home" ]]; then
+            username=$(basename "$user_home")
+            if id "$username" &>/dev/null; then
+                log "Cleaning desktop configs for user $username..."
+                sudo rm -rf "$user_home/.config/xfce4" 2>/dev/null || true
+                sudo rm -rf "$user_home/.config/openbox" 2>/dev/null || true
+                sudo rm -rf "$user_home/.config/tint2" 2>/dev/null || true
+                sudo rm -rf "$user_home/.config/lxpanel" 2>/dev/null || true
+                sudo rm -rf "$user_home/.config/lxsession" 2>/dev/null || true
+                sudo rm -rf "$user_home/.config/autostart" 2>/dev/null || true
+                sudo rm -rf "$user_home/.config/Thunar" 2>/dev/null || true
+                sudo rm -rf "$user_home/.config/xfce4-session" 2>/dev/null || true
+                sudo rm -f "$user_home/.xsession" 2>/dev/null || true
+                sudo rm -f "$user_home/.Xclients" 2>/dev/null || true
+                sudo rm -f "$user_home/.dmrc" 2>/dev/null || true
+                sudo rm -f "$user_home/.xprofile" 2>/dev/null || true
+                sudo rm -f "$user_home/.xinitrc" 2>/dev/null || true
+                sudo rm -f "$user_home/.gtkrc-2.0" 2>/dev/null || true
+                sudo rm -rf "$user_home/.themes" 2>/dev/null || true
+                sudo rm -rf "$user_home/.icons" 2>/dev/null || true
+            fi
+        fi
+    done
+    
+    # Clean system configurations
+    log "Cleaning system configuration files..."
+    sudo rm -rf /etc/xrdp 2>/dev/null || true
+    sudo rm -rf /var/lib/xrdp 2>/dev/null || true
+    sudo rm -rf /var/log/xrdp 2>/dev/null || true
+    sudo rm -rf /etc/xfce4 2>/dev/null || true
+    sudo rm -rf /etc/openbox 2>/dev/null || true
+    sudo rm -rf /usr/share/xfce4 2>/dev/null || true
+    sudo rm -f /etc/polkit-1/localauthority/50-local.d/45-allow-colord.pkla 2>/dev/null || true
+    sudo rm -f /usr/local/bin/rdp-pulseaudio-start 2>/dev/null || true
+    
+    # Clean systemd service files
+    sudo rm -f /etc/systemd/system/xrdp.service 2>/dev/null || true
+    sudo rm -f /etc/systemd/system/xrdp-sesman.service 2>/dev/null || true
+    sudo systemctl daemon-reload
+    
+    # Clean backup files
+    log "Cleaning backup files..."
+    rm -rf "$HOME"/xfce_rdp_backup_* 2>/dev/null || true
+    rm -rf "$HOME"/openbox_rdp_backup_* 2>/dev/null || true
+    rm -rf "$HOME"/desktop_backup_* 2>/dev/null || true
+    
+    # Clean temporary files
+    sudo rm -rf /tmp/.X* 2>/dev/null || true
+    sudo rm -rf /tmp/.tint2-* 2>/dev/null || true
+    sudo rm -rf /tmp/xfce4-* 2>/dev/null || true
+    sudo rm -rf /tmp/.ICE-unix/* 2>/dev/null || true
+    
+    # Reset default display manager
+    log "Resetting display manager settings..."
+    if [[ -f /etc/X11/default-display-manager ]]; then
+        sudo rm -f /etc/X11/default-display-manager
+        log "Removed default display manager setting"
+    fi
+    
+    # Clean firewall rules (RDP port only)
+    log "Cleaning RDP firewall rules..."
+    if command -v ufw >/dev/null 2>&1; then
+        sudo ufw delete allow 3389/tcp 2>/dev/null || true
+        log "Removed ufw RDP rule"
+    fi
+    if command -v firewall-cmd >/dev/null 2>&1; then
+        sudo firewall-cmd --permanent --remove-port=3389/tcp 2>/dev/null || true
+        sudo firewall-cmd --reload 2>/dev/null || true
+        log "Removed firewalld RDP rule"
+    fi
+    
+    # Clean software sources (if any special sources were added)
+    log "Cleaning possible added software sources..."
+    sudo rm -f /etc/apt/sources.list.d/xfce* 2>/dev/null || true
+    sudo rm -f /etc/apt/sources.list.d/openbox* 2>/dev/null || true
+    
+    # Final cleanup
+    log "Performing final cleanup..."
+    case $DISTRO in
+        ubuntu|debian)
+            sudo apt update 2>/dev/null || true
+            sudo apt autoremove --purge -y 2>/dev/null || true
+            sudo apt autoclean 2>/dev/null || true
+            ;;
+        centos|rhel|rocky|almalinux|fedora)
+            if command -v dnf >/dev/null 2>&1; then
+                sudo dnf autoremove -y 2>/dev/null || true
+                sudo dnf clean all 2>/dev/null || true
+            elif command -v yum >/dev/null 2>&1; then
+                sudo yum autoremove -y 2>/dev/null || true
+                sudo yum clean all 2>/dev/null || true
+            fi
+            ;;
+    esac
+    
+    # Clean snap packages (if any)
+    if command -v snap >/dev/null 2>&1; then
+        log "Cleaning related snap packages..."
+        sudo snap remove firefox 2>/dev/null || true
+    fi
+    
+    # Clean flatpak packages (if any)
+    if command -v flatpak >/dev/null 2>&1; then
+        log "Cleaning related flatpak packages..."
+        flatpak uninstall --unused -y 2>/dev/null || true
+    fi
+    
+    echo
+    echo -e "${GREEN}================================${NC}"
+    echo -e "${GREEN}  PURGE COMPLETED${NC}"
+    echo -e "${GREEN}================================${NC}"
+    echo
+    log "✓ Desktop environment purge completed successfully!"
+    echo
+    echo -e "${YELLOW}Purge Summary:${NC}"
+    echo "• Stopped and disabled all desktop-related services"
+    echo "• Uninstalled all desktop environment packages"
+    echo "• Removed all user desktop configuration files"
+    echo "• Cleaned system configuration files"
+    echo "• Removed auto-created RDP users"
+    echo "• Cleaned package caches and orphaned packages"
+    echo "• Reset firewall RDP rules"
+    echo
+    echo -e "${BLUE}Recommended Actions:${NC}"
+    echo "1. Reboot the system to ensure all changes take effect"
+    echo "2. Check disk space has been freed: df -h"
+    echo "3. To reinstall desktop environment, re-run this script"
+    echo
+    
+    # Show disk usage
+    echo -e "${GREEN}Current Disk Usage:${NC}"
+    df -h / 2>/dev/null || true
+    echo
+    
+    log "System has been restored to a clean state without desktop environments"
+}
+
+# Display main menu and handle user selection
+show_main_menu() {
+    echo
+    echo -e "${BLUE}================================${NC}"
+    echo -e "${BLUE}  XFCE + RDP Setup Script${NC}"
+    echo -e "${BLUE}================================${NC}"
+    echo
+    echo "Please select what you would like to do:"
+    echo
+    echo "1) Install XFCE Desktop + RDP Server"
+    echo "2) Completely remove all desktop environments and RDP"
+    echo "3) Exit"
+    echo
+    read -p "Enter your choice (1-3): " choice
+    
+    case $choice in
+        1)
+            log "Selected: Install XFCE Desktop + RDP Server"
+            install_xfce_rdp
+            ;;
+        2)
+            log "Selected: Completely remove all desktop environments"
+            purge_all_desktop_environments
+            ;;
+        3)
+            log "Exiting script"
+            exit 0
+            ;;
+        *)
+            error "Invalid choice. Please select 1, 2, or 3."
+            show_main_menu
+            ;;
+    esac
+}
+
+# Install XFCE + RDP function (original main functionality)
+install_xfce_rdp() {
+    log "Starting XFCE + RDP installation..."
     
     detect_distro
     handle_existing_installation
@@ -804,6 +1238,15 @@ main() {
             echo "3. Audio configured with fallback method - may need session restart for sound"
         fi
         
+        if [[ "$AUTO_YES" == "1" ]]; then
+            echo
+            echo -e "${RED}SECURITY NOTICE:${NC}"
+            echo -e "${YELLOW}Auto-created RDP user credentials:${NC}"
+            echo "  Username: user110"
+            echo "  Password: 111111"
+            echo "  ${RED}WARNING: Change this password after first login for security!${NC}"
+        fi
+        
         # Show backup information if backup was created
         if [[ -n "$BACKUP_DIR" ]] && [[ -d "$BACKUP_DIR" ]]; then
             echo
@@ -818,5 +1261,11 @@ main() {
     fi
 }
 
+# Main execution
+main() {
+    parse_args "$@"
+    show_main_menu
+}
+
 # Run main function
-main
+main "$@"

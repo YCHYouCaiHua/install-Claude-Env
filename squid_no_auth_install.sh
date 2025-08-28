@@ -45,6 +45,7 @@ truncate -s 0 /etc/squid/squid.conf
 # 使用最简配置确保外部访问正常，逐行添加避免heredoc问题
 echo "http_port 3128" | tee /etc/squid/squid.conf > /dev/null
 echo "http_access allow all" | tee -a /etc/squid/squid.conf > /dev/null
+echo "dns_v4_first on" | tee -a /etc/squid/squid.conf > /dev/null
 
 echo "✅ 配置文件创建完成"
 

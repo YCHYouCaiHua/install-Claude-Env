@@ -61,6 +61,13 @@ sed -i 's/API_KEY_PREFIX=cr_/API_KEY_PREFIX=ych_/' .env
 sed -i 's/ENCRYPTION_KEY=your-encryption-key-here/ENCRYPTION_KEY=oPkxyIBrLPDnS-JaW7FPSHJY_DWerQ9hYgL80D-wiws=/' .env
 echo "✅ .env 配置文件更新完成"
 
+echo "📋 即将执行: cat .env"
+echo "修改后的 .env 文件内容:"
+echo "----------------------------------------"
+cat .env
+echo "----------------------------------------"
+echo "✅ .env 文件内容显示完成"
+
 # Install web dependencies and build
 echo "📋 即将执行: npm run install:web"
 npm run install:web

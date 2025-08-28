@@ -68,14 +68,18 @@ cat .env
 echo "----------------------------------------"
 echo "✅ .env 文件内容显示完成"
 
-# Install web dependencies and build
+# Install web dependencies and clone web-dist
 echo "📋 即将执行: npm run install:web"
 npm run install:web
 echo "✅ Web 依赖包安装完成"
 
-echo "📋 即将执行: npm run build:web"
-npm run build:web
-echo "✅ Web 应用构建完成"
+echo "📋 即将执行: mkdir -p web/admin-spa/dist"
+mkdir -p web/admin-spa/dist
+echo "✅ 目录创建完成"
+
+echo "📋 即将执行: git clone -b web-dist https://github.com/Wei-Shaw/claude-relay-service.git web/admin-spa/dist"
+git clone -b web-dist https://github.com/Wei-Shaw/claude-relay-service.git web/admin-spa/dist
+echo "✅ Web 构建文件克隆完成"
 
 # Run setup
 echo "📋 即将执行: npm run setup"

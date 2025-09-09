@@ -23,7 +23,9 @@ log_error() {
 }
 
 # 获取服务器信息
-if [ $# -eq 2 ]; then
+if [ $# -eq 1 ]; then
+    SERVER=$1
+elif [ $# -eq 2 ]; then
     SERVER=$1
     PASSWORD=$2
 else
@@ -40,22 +42,18 @@ else
         fi
     done
     
-    # 获取密码
-    while true; do
-        read -p "请输入管理密码: " PASSWORD
-        if [ -n "$PASSWORD" ]; then
-            read -p "请再次确认密码: " PASSWORD_CONFIRM
-            if [ "$PASSWORD" = "$PASSWORD_CONFIRM" ]; then
-                break
-            else
-                log_warn "两次输入的密码不一致，请重新输入"
-            fi
-        else
-            log_warn "密码不能为空，请重新输入"
-        fi
-    done
-    
     echo ""
+fi
+
+# 如果没有提供密码，则生成随机密码
+if [ -z "$PASSWORD" ]; then
+    log_info "正在生成随机管理密码..."
+    PASSWORD=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 10)
+    if [ -z "$PASSWORD" ]; then
+        # 备用方法：使用date和随机数
+        PASSWORD=$(date +%s | sha256sum | base64 | head -c 10 | tr -dc A-Za-z0-9)
+    fi
+    log_info "管理密码已生成"
 fi
 
 # 检测是否为域名或IP
@@ -406,7 +404,7 @@ echo ""
 
 echo -e "${YELLOW}==================== 服务器配置 ====================${NC}"
 echo -e "服务器地址: ${GREEN}$SERVER${NC}"
-echo -e "管理密码: ${RED}$PASSWORD${NC}"
+echo -e "管理密码: ${RED}$PASSWORD${NC} ${YELLOW}(请妥善保存!)${NC}"
 echo -e "运行模式: ${GREEN}$([ "$IS_IP" = true ] && echo "IP模式 (HTTP)" || echo "域名模式 (HTTPS)")${NC}"
 echo ""
 
@@ -477,9 +475,17 @@ echo -e "测试API接口:"
 echo -e "  curl -H \"Authorization: Bearer $PASSWORD\" $PROTOCOL://$SERVER$PORT/api/version"
 echo ""
 
+echo -e "${YELLOW}==================== 重要信息 ====================${NC}"
+echo -e "${RED}⚠️  管理密码 (请立即保存): ${GREEN}$PASSWORD${NC}"
+echo -e "   这个密码用于:"
+echo -e "   • 访问Clash管理面板"
+echo -e "   • API接口认证"
+echo -e "   • 配置修改"
+echo ""
+
 echo -e "${YELLOW}==================== 安全建议 ====================${NC}"
 echo -e "${RED}重要提醒:${NC}"
-echo -e "1. 请妥善保管管理密码: ${RED}$PASSWORD${NC}"
+echo -e "1. ${RED}立即保存管理密码: $PASSWORD${NC}"
 echo -e "2. 建议定期更新系统和组件"
 echo -e "3. 监控服务器资源使用情况"
 echo -e "4. 定期检查日志文件"

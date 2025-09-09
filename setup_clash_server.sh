@@ -42,11 +42,9 @@ else
     
     # 获取密码
     while true; do
-        read -s -p "请输入管理密码: " PASSWORD
-        echo ""
+        read -p "请输入管理密码: " PASSWORD
         if [ -n "$PASSWORD" ]; then
-            read -s -p "请再次确认密码: " PASSWORD_CONFIRM
-            echo ""
+            read -p "请再次确认密码: " PASSWORD_CONFIRM
             if [ "$PASSWORD" = "$PASSWORD_CONFIRM" ]; then
                 break
             else

@@ -615,11 +615,57 @@ if wget -q --timeout=30 -O dashboard.tgz "https://github.com/MetaCubeX/metacubex
     echo "✓ 完成: Dashboard 压缩包下载"
     
     echo "正在执行: 解压并配置 Dashboard..."
-    tar -xzf dashboard.tgz
-    mv dist dashboard
-    rm dashboard.tgz
-    DASHBOARD_SUCCESS=true
-    echo "✓ 完成: Dashboard 解压配置"
+    
+    # 创建临时目录用于解压
+    TEMP_DIR="temp-dashboard-$$"
+    mkdir -p "$TEMP_DIR"
+    
+    # 解压到临时目录
+    tar -xzf dashboard.tgz -C "$TEMP_DIR"
+    
+    # 检查解压结果
+    echo "检查解压内容..."
+    ls -la "$TEMP_DIR"
+    
+    # 创建最终的dashboard目录
+    mkdir -p dashboard
+    
+    # 根据实际结构移动文件
+    if [ -d "$TEMP_DIR/dist" ]; then
+        echo "找到 dist 目录，移动内容到 dashboard"
+        mv "$TEMP_DIR/dist/"* dashboard/
+    elif [ -d "$TEMP_DIR/build" ]; then
+        echo "找到 build 目录，移动内容到 dashboard"
+        mv "$TEMP_DIR/build/"* dashboard/
+    elif [ -d "$TEMP_DIR/public" ]; then
+        echo "找到 public 目录，移动内容到 dashboard"
+        mv "$TEMP_DIR/public/"* dashboard/
+    else
+        # 检查是否有子目录
+        SUBDIRS=$(find "$TEMP_DIR" -mindepth 1 -maxdepth 1 -type d)
+        if [ -n "$SUBDIRS" ]; then
+            # 如果有子目录，移动第一个子目录的内容
+            FIRST_SUBDIR=$(echo "$SUBDIRS" | head -n 1)
+            echo "找到子目录 $FIRST_SUBDIR，移动其内容到 dashboard"
+            mv "$FIRST_SUBDIR/"* dashboard/ 2>/dev/null || true
+        else
+            # 直接移动所有文件到dashboard目录
+            echo "文件直接解压，移动所有内容到 dashboard"
+            mv "$TEMP_DIR/"* dashboard/ 2>/dev/null || true
+        fi
+    fi
+    
+    # 清理临时目录和压缩包
+    rm -rf "$TEMP_DIR" dashboard.tgz
+    
+    # 检查dashboard目录是否有内容
+    if [ -n "$(ls dashboard 2>/dev/null)" ]; then
+        DASHBOARD_SUCCESS=true
+        echo "✓ 完成: Dashboard 解压配置"
+    else
+        echo "❌ 警告: Dashboard 目录为空"
+        DASHBOARD_SUCCESS=false
+    fi
 
 # 方式2: 使用在线Dashboard (备选)
 elif wget -q --timeout=30 -O dashboard.zip "https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.zip" 2>/dev/null; then

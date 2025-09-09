@@ -826,7 +826,6 @@ echo "正在执行: 启用网络等待服务..."
 systemctl enable systemd-networkd-wait-online.service 2>/dev/null || true
 echo "✓ 完成: 网络等待服务配置"
 
-# 配置防火墙 (Ubuntu 默认使用 UFW)
 # 最终的服务自启动验证
 echo "正在执行: 执行服务自启动完整性检查..."
 
@@ -863,29 +862,6 @@ for service in "${services_to_check[@]}"; do
 done
 
 echo "✓ 完成: 服务自启动验证"
-
-echo "正在执行: 配置 Ubuntu 防火墙规则..."
-if command -v ufw >/dev/null; then
-    echo "正在执行: 允许必要端口通过防火墙..."
-    ufw --force enable
-    ufw allow 22/tcp comment "SSH"
-    ufw allow 80/tcp comment "HTTP"
-    ufw allow 443/tcp comment "HTTPS" 
-    ufw allow 7890/tcp comment "Clash HTTP Proxy"
-    ufw allow 7891/tcp comment "Clash HTTPS Proxy"
-    echo "✓ 完成: UFW 防火墙配置"
-    
-    echo "防火墙状态:"
-    ufw status numbered
-else
-    echo "⚠️ 警告: 未检测到 ufw"
-    echo "请手动配置防火墙开放以下端口:"
-    echo "- 22 (SSH)"
-    echo "- 80 (HTTP)" 
-    echo "- 443 (HTTPS)"
-    echo "- 7890 (Clash HTTP)"
-    echo "- 7891 (Clash HTTPS)"
-fi
 
 # 等待服务启动
 sleep 5
@@ -1059,10 +1035,6 @@ echo -e "Web服务配置: ${GREEN}$([ "$IS_IP" = true ] && echo "/etc/nginx/site
 echo -e "日志文件目录: ${GREEN}/var/log/clash-meta/${NC}"
 echo ""
 
-echo -e "${YELLOW}==================== 防火墙规则 ====================${NC}"
-echo -e "已开放端口: ${GREEN}80, 443, 7890, 7891${NC}"
-echo -e "查看防火墙状态: ${GREEN}sudo ufw status${NC}"
-echo ""
 
 echo -e "${YELLOW}==================== 测试连接 ====================${NC}"
 echo -e "测试Web服务:"
@@ -1100,7 +1072,6 @@ echo ""
 echo -e "${YELLOW}❌ 问题1: 无法访问订阅链接或管理面板${NC}"
 echo -e "   🔍 检查步骤:"
 echo -e "   • 确认服务运行: sudo systemctl status clash-meta"
-echo -e "   • 检查防火墙: sudo ufw status"
 echo -e "   • 测试端口: telnet $SERVER 80 (或443)"
 if [ "$IS_IP" = false ]; then
 echo -e "   • 验证域名解析: nslookup $SERVER"
@@ -1137,7 +1108,6 @@ fi
 echo -e "${GREEN}🛠️ 通用排查命令:${NC}"
 echo -e "   • 查看所有服务状态: sudo systemctl status clash-meta $([ "$IS_IP" = true ] && echo "nginx" || echo "caddy")"
 echo -e "   • 查看端口占用: sudo netstat -tlnp | grep -E '80|443|7890|7891'"
-echo -e "   • 查看防火墙状态: sudo ufw status numbered"
 echo -e "   • 测试网络连通性: ping $SERVER"
 echo ""
 echo -e "${GREEN}📞 获取帮助:${NC}"

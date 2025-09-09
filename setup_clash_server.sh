@@ -592,18 +592,83 @@ WantedBy=multi-user.target
 EOF
 echo "✓ 完成: systemd 服务文件创建"
 
-# 下载Clash Dashboard
-echo "正在执行: 下载 Clash Dashboard..."
+# 下载Clash Dashboard (MetaCubeXD)
+echo "正在执行: 下载官方 Clash Dashboard (MetaCubeXD)..."
 cd /var/lib/clash-meta
-wget -O dashboard.zip https://github.com/Dreamacro/clash-dashboard/archive/refs/heads/gh-pages.zip
-echo "✓ 完成: Dashboard 下载"
 
-echo "正在执行: 解压并配置 Dashboard..."
-unzip dashboard.zip
-mv clash-dashboard-gh-pages dashboard
-rm dashboard.zip
-chown -R clash:clash dashboard
-echo "✓ 完成: Dashboard 配置"
+# 获取最新Dashboard版本
+DASHBOARD_VERSION=$(curl -s https://api.github.com/repos/MetaCubeX/metacubexd/releases/latest | grep '"tag_name"' | cut -d '"' -f 4 2>/dev/null)
+if [ -z "$DASHBOARD_VERSION" ]; then
+    DASHBOARD_VERSION="v1.192.0"  # 备用版本
+    echo "⚠️ 警告: 无法获取最新版本，使用备用版本 $DASHBOARD_VERSION"
+else
+    echo "✓ 获取到Dashboard版本: $DASHBOARD_VERSION"
+fi
+
+# 尝试多种下载方式
+DASHBOARD_SUCCESS=false
+
+echo "正在执行: 下载 MetaCubeXD Dashboard $DASHBOARD_VERSION..."
+
+# 方式1: 下载压缩包
+if wget -q --timeout=30 -O dashboard.tgz "https://github.com/MetaCubeX/metacubexd/releases/download/$DASHBOARD_VERSION/compressed-dist.tgz" 2>/dev/null; then
+    echo "✓ 完成: Dashboard 压缩包下载"
+    
+    echo "正在执行: 解压并配置 Dashboard..."
+    tar -xzf dashboard.tgz
+    mv dist dashboard
+    rm dashboard.tgz
+    DASHBOARD_SUCCESS=true
+    echo "✓ 完成: Dashboard 解压配置"
+
+# 方式2: 使用在线Dashboard (备选)
+elif wget -q --timeout=30 -O dashboard.zip "https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.zip" 2>/dev/null; then
+    echo "✓ 完成: 在线Dashboard下载"
+    
+    echo "正在执行: 解压并配置在线Dashboard..."
+    unzip -q dashboard.zip
+    mv metacubexd-gh-pages dashboard 2>/dev/null || mv metacubexd-* dashboard 2>/dev/null
+    rm dashboard.zip
+    DASHBOARD_SUCCESS=true
+    echo "✓ 完成: 在线Dashboard配置"
+
+# 方式3: 创建简单的重定向Dashboard (最后备选)
+else
+    echo "⚠️ 警告: Dashboard下载失败，创建在线Dashboard重定向..."
+    mkdir -p dashboard
+    cat > dashboard/index.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Clash Dashboard - 重定向到在线版本</title>
+    <meta charset="utf-8">
+    <meta http-equiv="refresh" content="0;url=https://metacubexd.pages.dev">
+</head>
+<body>
+    <div style="text-align: center; padding-top: 50px; font-family: Arial;">
+        <h2>正在跳转到在线 Clash Dashboard...</h2>
+        <p>如果没有自动跳转，请点击: <a href="https://metacubexd.pages.dev">MetaCubeXD Dashboard</a></p>
+        <script>
+            window.location.href = 'https://metacubexd.pages.dev';
+        </script>
+    </div>
+</body>
+</html>
+EOF
+    DASHBOARD_SUCCESS=true
+    echo "✓ 完成: 重定向Dashboard创建"
+fi
+
+if [ "$DASHBOARD_SUCCESS" = true ]; then
+    chown -R clash:clash dashboard
+    echo "✓ 完成: Dashboard 配置"
+else
+    echo "❌ 错误: Dashboard 配置失败"
+    # 创建基本的错误页面
+    mkdir -p dashboard
+    echo "<h1>Dashboard暂时不可用</h1><p>请稍后重试或访问在线版本: <a href='https://metacubexd.pages.dev'>MetaCubeXD</a></p>" > dashboard/index.html
+    chown -R clash:clash dashboard
+fi
 
 # 启动并配置所有服务为自动启动
 echo "正在执行: 重新加载 systemd 配置..."
@@ -911,6 +976,7 @@ echo -e "   ✅ 推荐使用Clash客户端 (功能完整，规则自动切换)"
 echo -e "   ⚡ 临时使用可配置系统代理"
 echo -e "   🔄 定期更新订阅配置 (右键配置→更新)"
 echo -e "   📊 可通过管理面板监控流量: ${GREEN}$PROTOCOL://$SERVER$PORT/ui${NC}"
+echo -e "   🌐 或使用在线Dashboard: ${GREEN}https://metacubexd.pages.dev${NC}"
 echo ""
 
 echo -e "${YELLOW}==================== 服务管理 ====================${NC}"

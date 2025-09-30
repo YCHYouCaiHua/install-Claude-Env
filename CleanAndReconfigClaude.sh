@@ -18,18 +18,18 @@ echo -e "${BLUE}================================${NC}"
 echo -e "${BLUE}   Claude 完整清理脚本 v1.0    ${NC}"
 echo -e "${BLUE}================================${NC}"
 echo ""
-echo -e "${YELLOW}⚠️  警告: 此脚本将彻底清除系统中所有 Claude 相关内容${NC}"
-echo "包括配置文件、缓存、环境变量等，操作不可逆！"
+echo -e "${YELLOW}⚠️  警告: 此脚本将自动完成 Claude 的清理、重装和配置${NC}"
+echo "包括清理旧版本、重新安装最新版本、配置 API 信息等，操作不可逆！"
 echo ""
-echo "将要清理的内容："
-echo "• Claude 所有配置和数据目录"
-echo "• 所有包管理器中的 Claude 相关包"
-echo "• Shell 配置文件中的环境变量（会自动备份）"
-echo "• 缓存、临时文件和日志"
-echo "• Docker 容器和镜像"
-echo "• 系统级安装文件"
+echo "此脚本将自动执行以下操作："
+echo "• 彻底清理现有 Claude 安装（配置、缓存、环境变量等）"
+echo "• 卸载所有包管理器中的 Claude 相关包"
+echo "• 自动备份并清理 Shell 配置文件"
+echo "• 重新安装最新版本的 Claude SDK"
+echo "• 配置 API 地址和 Token（需要用户输入）"
+echo "• 自动写入环境变量配置"
 echo ""
-read -p "确定要继续吗？(y/N): " -n 1 -r
+read -p "是否继续执行？(y/N): " -n 1 -r
 echo ""
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo -e "${YELLOW}操作已取消${NC}"
@@ -267,191 +267,190 @@ echo "3. 如果使用了其他包管理器安装 Claude，可能需要手动清�
 echo "4. 如需恢复配置，可使用备份文件"
 echo ""
 
-# 询问是否要重新安装 Claude SDK
+# 自动开始重新安装 Claude SDK
 echo -e "${BLUE}================================${NC}"
-echo -e "${BLUE}    Claude SDK 重新安装选项    ${NC}"
+echo -e "${BLUE}    Claude SDK 重新安装        ${NC}"
 echo -e "${BLUE}================================${NC}"
 echo ""
-read -p "是否要重新安装 Claude SDK？(y/N): " -n 1 -r
+echo -e "${GREEN}开始重新安装 Claude SDK...${NC}"
+
+# 验证清理是否完成
+echo "正在执行: 验证清理完成状态..."
+
+# 检查关键目录是否已被清理
+cleanup_failed=false
+critical_dirs=(
+    "$HOME/.config/claude"
+    "$HOME/.cache/claude"
+    "$HOME/.local/share/claude"
+)
+
+for dir in "${critical_dirs[@]}"; do
+    if [ -d "$dir" ]; then
+        echo -e "${RED}❌ 错误: 关键目录未被清理: $dir${NC}"
+        cleanup_failed=true
+    fi
+done
+
+# 检查全局包是否已被卸载
+if command -v npm >/dev/null 2>&1; then
+    if npm list -g @anthropic/claude-code 2>/dev/null | grep -q "@anthropic/claude-code"; then
+        echo -e "${RED}❌ 错误: npm 全局包 @anthropic/claude-code 仍然存在${NC}"
+        cleanup_failed=true
+    fi
+fi
+
+# 如果清理验证失败，终止安装
+if [ "$cleanup_failed" = true ]; then
+    echo ""
+    echo -e "${RED}❌ 安装终止: 检测到清理过程未完全成功${NC}"
+    echo -e "${YELLOW}请检查上述错误信息，手动清理剩余文件后重新运行脚本${NC}"
+    echo ""
+    exit 1
+fi
+
+echo -e "${GREEN}✓ 验证完成: 清理状态正常，可以开始安装${NC}"
 echo ""
 
-if [[ $REPLY =~ ^[Yy]$ ]]; then
+# 开始安装过程
+echo "正在执行: 安装 Claude SDK..."
+
+# 检查 Node.js 和 npm 是否可用
+if ! command -v node >/dev/null 2>&1; then
+    echo -e "${RED}❌ 错误: 未检测到 Node.js，请先安装 Node.js${NC}"
+    echo "建议安装方式: https://nodejs.org/ 或使用 brew install node"
+    exit 1
+fi
+
+if ! command -v npm >/dev/null 2>&1; then
+    echo -e "${RED}❌ 错误: 未检测到 npm，请先安装 npm${NC}"
+    exit 1
+fi
+
+echo "✓ Node.js 版本: $(node --version)"
+echo "✓ npm 版本: $(npm --version)"
+echo ""
+
+# 安装最新版本的 Claude SDK
+echo "正在执行: 通过 npm 安装 @anthropic/claude-code..."
+if npm install -g @anthropic-ai/claude-code; then
+    echo -e "${GREEN}✓ 完成: Claude SDK 安装成功${NC}"
+
+    # 验证安装
+    if command -v claude >/dev/null 2>&1; then
+        echo -e "${GREEN}✓ 验证: Claude 命令可用${NC}"
+        echo "Claude 版本: $(claude --version 2>/dev/null || echo '无法获取版本信息')"
+    else
+        echo -e "${YELLOW}⚠️  警告: Claude 命令不可用，可能需要重启终端或重新加载 PATH${NC}"
+    fi
+
     echo ""
-    echo -e "${GREEN}开始重新安装 Claude SDK...${NC}"
-    
-    # 验证清理是否完成
-    echo "正在执行: 验证清理完成状态..."
-    
-    # 检查关键目录是否已被清理
-    cleanup_failed=false
-    critical_dirs=(
-        "$HOME/.config/claude"
-        "$HOME/.cache/claude"
-        "$HOME/.local/share/claude"
-    )
-    
-    for dir in "${critical_dirs[@]}"; do
-        if [ -d "$dir" ]; then
-            echo -e "${RED}❌ 错误: 关键目录未被清理: $dir${NC}"
-            cleanup_failed=true
-        fi
-    done
-    
-    # 检查全局包是否已被卸载
-    if command -v npm >/dev/null 2>&1; then
-        if npm list -g @anthropic/claude-code 2>/dev/null | grep -q "@anthropic/claude-code"; then
-            echo -e "${RED}❌ 错误: npm 全局包 @anthropic/claude-code 仍然存在${NC}"
-            cleanup_failed=true
-        fi
-    fi
-    
-    # 如果清理验证失败，终止安装
-    if [ "$cleanup_failed" = true ]; then
-        echo ""
-        echo -e "${RED}❌ 安装终止: 检测到清理过程未完全成功${NC}"
-        echo -e "${YELLOW}请检查上述错误信息，手动清理剩余文件后重新运行脚本${NC}"
-        echo ""
-        exit 1
-    fi
-    
-    echo -e "${GREEN}✓ 验证完成: 清理状态正常，可以开始安装${NC}"
+    echo -e "${GREEN}✅ Claude SDK 重新安装完成！${NC}"
     echo ""
-    
-    # 开始安装过程
-    echo "正在执行: 安装 Claude SDK..."
-    
-    # 检查 Node.js 和 npm 是否可用
-    if ! command -v node >/dev/null 2>&1; then
-        echo -e "${RED}❌ 错误: 未检测到 Node.js，请先安装 Node.js${NC}"
-        echo "建议安装方式: https://nodejs.org/ 或使用 brew install node"
-        exit 1
-    fi
-    
-    if ! command -v npm >/dev/null 2>&1; then
-        echo -e "${RED}❌ 错误: 未检测到 npm，请先安装 npm${NC}"
-        exit 1
-    fi
-    
-    echo "✓ Node.js 版本: $(node --version)"
-    echo "✓ npm 版本: $(npm --version)"
+
+    # API 配置部分
+    echo -e "${BLUE}================================${NC}"
+    echo -e "${BLUE}      API 配置 (必填)         ${NC}"
+    echo -e "${BLUE}================================${NC}"
     echo ""
-    
-    # 安装最新版本的 Claude SDK
-    echo "正在执行: 通过 npm 安装 @anthropic/claude-code..."
-    if npm install -g @anthropic-ai/claude-code; then
-        echo -e "${GREEN}✓ 完成: Claude SDK 安装成功${NC}"
-        
-        # 验证安装
-        if command -v claude >/dev/null 2>&1; then
-            echo -e "${GREEN}✓ 验证: Claude 命令可用${NC}"
-            echo "Claude 版本: $(claude --version 2>/dev/null || echo '无法获取版本信息')"
+    echo "需要配置 Claude API 信息才能继续。"
+    echo ""
+
+    # 获取用户的 shell 配置文件（使用 $SHELL 环境变量检测默认 shell）
+    if [[ "$SHELL" == *"zsh"* ]]; then
+        SHELL_CONFIG="$HOME/.zshrc"
+    elif [[ "$SHELL" == *"bash"* ]]; then
+        # macOS 上优先使用 .bash_profile，Linux 上使用 .bashrc
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            SHELL_CONFIG="$HOME/.bash_profile"
         else
-            echo -e "${YELLOW}⚠️  警告: Claude 命令不可用，可能需要重启终端或重新加载 PATH${NC}"
+            SHELL_CONFIG="$HOME/.bashrc"
         fi
-        
-        echo ""
-        echo -e "${GREEN}✅ Claude SDK 重新安装完成！${NC}"
-        echo ""
-        
-        # API 配置部分
-        echo -e "${BLUE}================================${NC}"
-        echo -e "${BLUE}      API 配置 (可选)         ${NC}"
-        echo -e "${BLUE}================================${NC}"
-        echo ""
-        echo "您可以现在配置 Claude API 信息，或稍后手动配置。"
-        echo ""
-        
-        # 获取用户的 shell 配置文件
-        if [ -n "$ZSH_VERSION" ]; then
+    else
+        # 默认检查顺序（基于文件存在性）
+        if [ -f "$HOME/.zshrc" ]; then
             SHELL_CONFIG="$HOME/.zshrc"
-        elif [ -n "$BASH_VERSION" ]; then
+        elif [ -f "$HOME/.bash_profile" ]; then
+            SHELL_CONFIG="$HOME/.bash_profile"
+        elif [ -f "$HOME/.bashrc" ]; then
             SHELL_CONFIG="$HOME/.bashrc"
         else
-            # 默认检查顺序
-            if [ -f "$HOME/.zshrc" ]; then
+            # 如果都不存在，在 macOS 上默认创建 .zshrc
+            if [[ "$OSTYPE" == "darwin"* ]]; then
                 SHELL_CONFIG="$HOME/.zshrc"
-            elif [ -f "$HOME/.bashrc" ]; then
-                SHELL_CONFIG="$HOME/.bashrc"
             else
-                SHELL_CONFIG="$HOME/.bash_profile"
+                SHELL_CONFIG="$HOME/.bashrc"
             fi
         fi
-        
-        # 输入 API URL
-        echo -n "请输入 Claude API 地址 (留空按回车键跳过): "
-        read api_url
-        
-        # 输入 API Token
-        echo -n "请输入您的 API Token (留空按回车键跳过): "
-        read api_token
-        
-        # 如果用户提供了配置信息，写入配置文件
-        if [ -n "$api_url" ] || [ -n "$api_token" ]; then
-            echo ""
-            echo "正在执行: 配置 API 信息到 $SHELL_CONFIG..."
-            
-            # 备份配置文件
-            cp "$SHELL_CONFIG" "$SHELL_CONFIG.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
-            
-            # 添加配置注释
-            echo "" >> "$SHELL_CONFIG"
-            echo "# Claude API 配置 - 由 clean_claude.sh 添加 $(date)" >> "$SHELL_CONFIG"
-            
-            # 添加 API URL
-            if [ -n "$api_url" ]; then
-                echo "export ANTHROPIC_BASE_URL=\"$api_url\"" >> "$SHELL_CONFIG"
-                echo -e "${GREEN}✓ 已添加 API 地址配置${NC}"
-            fi
-            
-            # 添加 API Token
-            if [ -n "$api_token" ]; then
-                echo "export ANTHROPIC_AUTH_TOKEN=\"$api_token\"" >> "$SHELL_CONFIG"
-                echo -e "${GREEN}✓ 已添加 API Token 配置${NC}"
-            fi
-            
-            echo "" >> "$SHELL_CONFIG"
-            
-            echo -e "${GREEN}✓ API 配置已写入 $SHELL_CONFIG${NC}"
-            echo -e "${YELLOW}⚠️  请重启终端或运行以下命令使配置生效:${NC}"
-            echo "source $SHELL_CONFIG"
-            echo ""
-            
-            # 验证配置
-            echo "配置验证："
-            if [ -n "$api_url" ]; then
-                echo "API 地址: $api_url"
-            fi
-            if [ -n "$api_token" ]; then
-                echo "API Token: $(echo "$api_token" | sed 's/./*/g')"  # 隐藏 token 显示
-            fi
-            
-        else
-            echo -e "${YELLOW}跳过 API 配置${NC}"
-            echo "您可以稍后通过以下方式配置："
-            echo "1. 手动编辑 $SHELL_CONFIG 添加环境变量"
-            echo "2. 使用 'claude login' 命令进行配置"
-        fi
-        
-        echo ""
-        echo -e "${BLUE}后续步骤：${NC}"
-        echo "1. 重启终端或运行: source $SHELL_CONFIG"
-        echo "2. 运行 'claude --help' 验证安装"
-        if [ -z "$api_url" ] && [ -z "$api_token" ]; then
-            echo "3. 使用 'claude login' 配置您的 API 密钥"
-        else
-            echo "3. 运行 'claude' 开始使用"
-        fi
-        echo ""
-        
-    else
-        echo -e "${RED}❌ 错误: Claude SDK 安装失败${NC}"
-        echo "请检查网络连接和 npm 配置，或尝试手动安装:"
-        echo "npm install -g @anthropic/claude-code"
-        exit 1
     fi
-    
+
+    echo "检测到的默认 Shell: $SHELL"
+    echo "将配置写入: $SHELL_CONFIG"
+    echo ""
+
+    # 输入 API URL（必填）
+    api_url=""
+    while [ -z "$api_url" ]; do
+        echo -n "请输入 Claude API 地址 (必填): "
+        read api_url
+        if [ -z "$api_url" ]; then
+            echo -e "${RED}❌ 错误: API 地址不能为空，请重新输入${NC}"
+        fi
+    done
+
+    # 输入 API Token（必填）
+    api_token=""
+    while [ -z "$api_token" ]; do
+        echo -n "请输入您的 API Token (必填): "
+        read api_token
+        if [ -z "$api_token" ]; then
+            echo -e "${RED}❌ 错误: API Token 不能为空，请重新输入${NC}"
+        fi
+    done
+
+    # 写入配置文件
+    echo ""
+    echo "正在执行: 配置 API 信息到 $SHELL_CONFIG..."
+
+    # 备份配置文件
+    cp "$SHELL_CONFIG" "$SHELL_CONFIG.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+
+    # 添加配置注释
+    echo "" >> "$SHELL_CONFIG"
+    echo "# Claude API 配置 - 由 clean_claude.sh 添加 $(date)" >> "$SHELL_CONFIG"
+
+    # 添加 API URL
+    echo "export ANTHROPIC_BASE_URL=\"$api_url\"" >> "$SHELL_CONFIG"
+    echo -e "${GREEN}✓ 已添加 API 地址配置${NC}"
+
+    # 添加 API Token
+    echo "export ANTHROPIC_AUTH_TOKEN=\"$api_token\"" >> "$SHELL_CONFIG"
+    echo -e "${GREEN}✓ 已添加 API Token 配置${NC}"
+
+    echo "" >> "$SHELL_CONFIG"
+
+    echo -e "${GREEN}✓ API 配置已写入 $SHELL_CONFIG${NC}"
+    echo -e "${YELLOW}⚠️  请重启终端或运行以下命令使配置生效:${NC}"
+    echo "source $SHELL_CONFIG"
+    echo ""
+
+    # 验证配置
+    echo "配置验证："
+    echo "API 地址: $api_url"
+    echo "API Token: $(echo "$api_token" | sed 's/./*/g')"  # 隐藏 token 显示
+
+    echo ""
+    echo -e "${BLUE}后续步骤：${NC}"
+    echo "1. 重启终端或运行: source $SHELL_CONFIG"
+    echo "2. 运行 'claude --help' 验证安装"
+    echo "3. 运行 'claude' 开始使用"
+    echo ""
+
 else
-    echo -e "${YELLOW}跳过 Claude SDK 安装${NC}"
+    echo -e "${RED}❌ 错误: Claude SDK 安装失败${NC}"
+    echo "请检查网络连接和 npm 配置，或尝试手动安装:"
+    echo "npm install -g @anthropic/claude-code"
+    exit 1
 fi
 
 echo ""
